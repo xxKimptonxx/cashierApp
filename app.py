@@ -1,6 +1,9 @@
 #Packages:
 #Database
 import sqlite3 as sql
+#load and save settings
+import pickle
+import os 
 #UI/UX
 import customtkinter as ctk
 import tkinter as tk
@@ -12,9 +15,8 @@ import pyttsx3 as tts
 import secrets
 
 #initializing
-taxPercentage = 12
+taxPercentage = 15
 products = []
-
 appname = "SaleSwift"
 #Database
 connection = sql.connect("Database.db")
@@ -29,7 +31,7 @@ cursor.execute('''
     )
 ''')
 connection.commit()
-
+ttsEngine = tts.init()
 #Variables, functions and classes 
 class Product:
     def __init__(self, ID = 0,Name = "",Price =0,Description=""):
@@ -39,9 +41,60 @@ class Product:
         self.Description = Description
     def Tax(self):
         return (float(self.Price)*taxPercentage)/100
+class Settings:
+    def __init__(self, file_name='settings_data.pkl'):
+        self.file_name = file_name
+        self.data = {}
+        self.load_settings_on_startup()
+        self.ApplySettings()
 
-ttsEngine = tts.init()
-ctk.set_appearance_mode("dark")
+    def update_setting(self, key, value):
+        self.data[key] = value
+        self.ApplySettings()
+        
+    def save_settings(self):
+        with open(self.file_name, 'wb') as file:
+            pickle.dump(self.data, file)
+
+    def load_settings(self):
+        try:
+            with open(self.file_name, 'rb') as file:
+                self.data = pickle.load(file)
+                
+        except (FileNotFoundError, pickle.UnpicklingError):
+            print("Settings file not found or corrupted. Creating new settings.")
+            self.create_default_settings()
+        except Exception as e:
+            print(f"An error occurred while loading settings: {str(e)}")
+
+    def load_settings_on_startup(self):
+        if os.path.exists(self.file_name):
+            self.load_settings()
+        else:
+            print("Settings file not found. Creating new settings.")
+            self.create_default_settings()
+        self.ApplySettings()
+
+    def create_default_settings(self):
+        # Define your default settings here
+        self.data = {
+            "Theme":"System",
+            "colour":"blue",
+            "TTSVoice":0,
+            "TTSRate":100,
+            "TTSVolume":1
+        }
+        self.save_settings()
+    def ApplySettings(self):
+        ttsEngine.setProperty('rate', self.data["TTSRate"])
+        ttsEngine.setProperty('volume',self.data["TTSVolume"])
+        voices = ttsEngine.getProperty('voices')
+        ttsEngine.setProperty('voice', voices[self.data["TTSVoice"]].id)
+        ctk.set_appearance_mode(self.data["Theme"])
+        ctk.set_default_color_theme(self.data["colour"])
+
+settings = Settings()
+
 def reportError(Error):
     ttsEngine.stop()
     ttsEngine.say(f"Error we have encountered the following error, {Error}")
@@ -94,7 +147,6 @@ def AddProduct():
         Description = DescriptionEntry.get()
         isPriceValid = True
         try:
-            print("point 1")
             priceV2 = float(PriceEntry.get())
             #You may be wondering why im using secrets rather than "==", its because "==" is vulnerable to timing attacks
         except ValueError:
@@ -106,7 +158,6 @@ def AddProduct():
             if secrets.compare_digest(name,""):
                 reportError("Name field may not be empty")
             else:
-                print("point 2")
                 isNameValid = True
                 for product in products:
                     if product.Name == name:
@@ -142,7 +193,6 @@ def DeleteProduct():
             # Assuming 'user_id' is the first value in the values list
             user_id = int(values[4])
             name = values[0]
-            print(user_id)
             # Delete the row from the database
             for product in products:
                 if product.ID == user_id:
@@ -213,13 +263,76 @@ EPBtn.grid(row = 1,column = 2)
 # start code
 cursor.execute('SELECT * FROM Products')
 rows = cursor.fetchall()
-print(rows)
 for row in rows:
     prod = Product(row[0],row[1],row[2],row[3])
     products.append(prod)
     TableOfProducts.insert("", tk.END, values=(prod.Name, prod.Price, prod.Tax(),prod.Description,prod.ID))
 
+def SettingsMenu():
+    SettingsWinContainer = ctk.CTkToplevel()
+    SettingsWinContainer.title("Settings")
+    SettingsWin = ctk.CTkScrollableFrame(SettingsWinContainer)
+    SettingsWin.pack(fill = tk.BOTH,expand = True)
 
+    def ThemeChange(newTheme : str):
+        settings.update_setting("Theme",newTheme)
+    ThemeHeader = ctk.CTkLabel(SettingsWin,text="Theme:",font=("Arial Rounded MT Bold",24))
+    ThemeHeader.grid(row = 0,column = 0)
+    ThemeDropVar = ctk.StringVar(SettingsWin)
+    ThemeDropDown = ctk.CTkOptionMenu(SettingsWin,variable=ThemeDropVar,values=["system","dark","light"],command=ThemeChange)
+    ThemeDropVar.set(settings.data["Theme"])
+    ThemeDropDown.grid(row = 1,column = 0)
+
+    def ColourChange(newColour : str):
+        if newColour =="dark blue":
+            settings.update_setting("colour", "dark-blue")
+        else:
+            settings.update_setting("colour", newColour)
+    ColourHeader = ctk.CTkLabel(SettingsWin,text="Accent Colour:",font=("Arial Rounded MT Bold",24))
+    ColourHeader.grid(row = 2,column = 0)
+    ColourDropVar = ctk.StringVar(SettingsWin)
+    ColourDropDown = ctk.CTkOptionMenu(SettingsWin,variable=ColourDropVar,values=["blue","dark blue","green"],command=ColourChange)
+    ColourDropVar.set(settings.data["colour"])
+    ColourDropDown.grid(row = 3,column = 0)
+
+    TTSHeader = ctk.CTkLabel(SettingsWin,text="TTS(Text-To-Speech) configuration:",font=("Arial Rounded MT Bold",24))
+    TTSHeader.grid(row = 4,column = 0)
+
+    def VoiceChange(newVoice : str):
+        if newVoice == "Male":
+            settings.update_setting("TTSVoice", 0)
+        elif newVoice == "Female":
+            settings.update_setting("TTSVoice", 1)
+    VoiceHeader = ctk.CTkLabel(SettingsWin,text="Voice:",font=("Arial Rounded MT Bold",24))
+    VoiceHeader.grid(row = 5,column = 0)
+    VoiceDropVar = ctk.StringVar(SettingsWin)
+    VoiceDropDown = ctk.CTkOptionMenu(SettingsWin,variable=VoiceDropVar,values=["Male","Female"],command=VoiceChange)
+    if settings.data["TTSVoice"] == 0:
+        VoiceDropVar.set("Male")
+    elif settings.data["TTSVoice"] == 1:
+        VoiceDropVar.set("Female")
+    VoiceDropDown.grid(row = 6,column = 0)
+
+    def RateChange(newRate : int):
+        settings.update_setting("TTSRate", newRate)
+    RateHeader = ctk.CTkLabel(SettingsWin,text="Rate:",font=("Arial Rounded MT Bold",24))
+    RateHeader.grid(row = 7,column = 0)
+    RateDropDown = ctk.CTkSlider(SettingsWin,from_=30,to=200,command=RateChange,)
+    RateDropDown.grid(row = 8,column = 0)
+    RateDropDown.set(settings.data["TTSRate"])
+
+    def VolumeChange(newVolume : int):
+        settings.update_setting("TTSVolume", newVolume/100)
+    VolumeHeader = ctk.CTkLabel(SettingsWin,text="Volume:",font=("Arial Rounded MT Bold",24))
+    VolumeHeader.grid(row = 9,column = 0)
+    VolumeDropDown = ctk.CTkSlider(SettingsWin,from_=0,to=100,command=VolumeChange)
+    VolumeDropDown.grid(row = 10,column = 0)
+    RateDropDown.set(settings.data["TTSVolume"])
+    def TestVoice():
+        ttsEngine.say("This is what the voice sounds like.")
+        ttsEngine.runAndWait()
+    testvoicebtn = ctk.CTkButton(SettingsWin,text="Test Voice",command=lambda:TestVoice())
+    testvoicebtn.grid(row = 11,column = 0)
 #Checkout 
 def Checkout():
     class cartItem:
@@ -264,13 +377,13 @@ def Checkout():
     info.grid(row = 0,column = 3)
     TotalHeader = ctk.CTkLabel(info,text="Total:",font=("Arial Rounded MT Bold",24))
     TotalHeader.grid(row = 0,column = 0)
-    TotalAdition = ctk.CTkLabel(info,text="")
+    TotalAdition = ctk.CTkLabel(info,text="N$0.0")
     TotalAdition.grid(row =1,column = 0, sticky='w')
     TaxHeader = ctk.CTkLabel(info,text="Tax:",font=("Arial Rounded MT Bold",24))
     TaxHeader.grid(row = 2,column = 0)
-    TaxAdition = ctk.CTkLabel(info,text="")
+    TaxAdition = ctk.CTkLabel(info,text="N$0.0")
     TaxAdition.grid(row =3,column = 0, sticky='w')
-    ChangeCalculaterHeader = ctk.CTkLabel(info,text="Tax:",font=("Arial Rounded MT Bold",24))
+    ChangeCalculaterHeader = ctk.CTkLabel(info,text="Change Calculator:",font=("Arial Rounded MT Bold",24))
     ChangeCalculaterHeader.grid(row = 4,column = 0)
     AmountTenderedEntry = ctk.CTkEntry(info,placeholder_text="The Amount Tendered:")
     AmountTenderedEntry.grid(row = 5,column = 0)
@@ -288,9 +401,9 @@ def Checkout():
                 ChangeText.grid(row =0,column = 0)
 
             else:
-                msgbox.showerror("Not enough money was tendered")
+                msgbox.showerror("Error","Not enough money was tendered")
         except ValueError:
-            msgbox.showerror("Please enter a valid number")
+            msgbox.showerror("Error","Please enter a valid number")
     SubmitBtn = ctk.CTkButton(info,text = "Submit",command=lambda:Submit())
     SubmitBtn.grid(row =6,column=0)
     def refreshCart():
@@ -330,8 +443,6 @@ def Checkout():
                     if secrets.compare_digest(produc.Name,prod):
                         selectedProduct = produc
                         break
-                    else:
-                        print("0")
             prodlabel = ctk.CTkLabel(APTCW,text="Product:")
             prodlabel.grid(row =0,column = 0)
             productsDropDown = ctk.CTkOptionMenu(APTCW,values=productsNamesList,command=selectProd)
@@ -394,7 +505,7 @@ def Checkout():
                 try:
                     NQV2 = int(NQV1)
                     if NQV2 == 0:
-                        pass
+                        msgbox.showerror("Error","New Quantity mist be more than 0.")
                     else:
                         for CI in cart:
                             if CI.product.Name == values[1]:
@@ -404,7 +515,7 @@ def Checkout():
                         NQW.destroy()
                         
                 except ValueError:
-                    msgbox.showerror("","Ne2 Quantity must be integer")
+                    msgbox.showerror("","New Quantity must be integer")
             SubmitBtn = ctk.CTkButton(NQW,text="Submit",command=lambda:submit())
             SubmitBtn.grid(row =1,column = 0)
             refreshCart()
@@ -415,11 +526,13 @@ def Checkout():
     EPICBtn = ctk.CTkButton(CheckoutWin,text="Edit Product in Cart",command=lambda:EditProductInCart())
     EPICBtn.grid(row =1,column = 2)
     
-    
+settings.ApplySettings() 
     
 CheckoutBtn = ctk.CTkButton(win,text="Checkout",command=lambda:Checkout())
 CheckoutBtn.grid(row =0,column= 4)
-ttsEngine.say(f"Welcome to {appname}")
+SettingsBtn = ctk.CTkButton(win,text="Settings",command=lambda:SettingsMenu())
+SettingsBtn.grid(row = 1,column = 4)
+#ttsEngine.say(f"Welcome to {appname}")
 ttsEngine.runAndWait()
 win.mainloop()
 
